@@ -1,0 +1,171 @@
+# trigger:
+# - main
+
+# pool: infracost
+
+# stages:
+#   - stage: LintStage
+#     jobs:
+#       - job: Lint
+#         displayName: Lint All
+#         steps:
+#           # 1️⃣ Checkout repo
+#           - checkout: self
+
+#           # 2️⃣ Lint JavaScript (Biome)
+#           - task: PowerShell@2
+#             continueOnError: true
+#             displayName: Lint JavaScript (Biome)
+#             inputs:
+#               targetType: 'inline'
+#               script: |
+#                 Invoke-WebRequest -Uri "https://github.com/biomejs/biome/releases/download/v0.0.0/biome-x86_64.exe" -OutFile "$(Agent.ToolsDirectory)\biome.exe"
+#                 & "$(Agent.ToolsDirectory)\biome.exe" lint "$(System.DefaultWorkingDirectory)/src"
+
+#           # 3️⃣ Lint CSS (Stylelint)
+#           - task: PowerShell@2
+#             continueOnError: true
+#             displayName: Lint CSS (Stylelint)
+#             inputs:
+#               targetType: 'inline'
+#               script: |
+#                 npm install -g stylelint
+#                 npm install -g stylelint-config-standard
+#                 npx stylelint "$(System.DefaultWorkingDirectory)/src/**/*.css" --config stylelint.config.cjs
+
+#           # 4️⃣ Lint YAML (yamllint)
+#           - task: PowerShell@2
+#             continueOnError: true
+#             displayName: Lint YAML (yamllint)
+#             inputs:
+#               targetType: 'inline'
+#               script: |
+#                 python -m ensurepip
+#                 python -m pip install --upgrade pip
+#                 python -m pip install yamllint
+#                 yamllint "$(System.DefaultWorkingDirectory)"
+
+#           # 5️⃣ Lint Markdown (markdownlint)
+#           - task: PowerShell@2
+#             continueOnError: true
+#             displayName: Lint Markdown (markdownlint)
+#             inputs:
+#               targetType: 'inline'
+#               script: |
+#                 npm install -g markdownlint-cli
+#                 markdownlint "$(System.DefaultWorkingDirectory)"
+
+
+trigger: none
+
+pool: application_pool
+
+name: ToDoInfra_Pipeline
+
+stages:
+  # - stage: ScanningStage
+  #   displayName: 'Scanning: SonarQube Scanning'
+  #   jobs:
+  #     - job: ScanningJob
+  #       displayName: 'Scanning Job'
+  #       steps:
+  #         - task: SonarQubePrepare@8
+  #           inputs:
+  #             SonarQube: 'pipeline'
+  #             scannerMode: 'cli'
+  #             configMode: 'manual'
+  #             cliProjectKey: 'pipeline_project'
+  #             cliProjectName: 'pipeline_project'
+  #             cliSources: '.'
+  #         - task: SonarQubeAnalyze@8
+  #           inputs:
+  #             jdkversion: 'JAVA_HOME_17_X64'
+
+  #         - task: SonarQubePublish@8
+  #           inputs:
+  #             pollingTimeoutSec: '300'
+
+  - stage: Linting
+    displayName: 'Linting Stage'
+    jobs:
+      - job: Lintingjob
+        steps:
+          - task: NodeTool@0
+            displayName: 'Node install'
+            inputs:
+              versionSource: 'spec'
+              versionSpec: '6.x'
+
+          - task: UsePythonVersion@0
+            displayName: 'Python install'
+            inputs:
+              versionSpec: '3.x'
+              addToPath: true
+              architecture: 'x64'
+
+          - task: PowerShell@2
+            displayName: 'Run Yamllint'
+            continueOnError: true
+            inputs:
+              targetType: 'inline'
+              script: |
+                pip install yamllint
+                yamllint .
+
+          - task: PowerShell@2
+            displayName: 'Run MarkDownLint'
+            continueOnError: true
+            inputs:
+              targetType: 'inline'
+              script: |
+                npm install -g markdownlint-cli
+                markdownlint "**/*.md"
+
+          - task: PowerShell@2
+            continueOnError: true
+            inputs:
+              targetType: 'inline'
+              script: |
+                npm install -g @biomejs/biome
+                biome lint .
+
+  - stage: Build
+    displayName: 'Application Build'
+    dependsOn: Linting
+    jobs:
+      - job: BuildJob
+        steps:
+          - task: PowerShell@2
+            inputs:
+              targetType: 'inline'
+              script: 'npm install'
+          
+          - task: PowerShell@2
+            inputs:
+              targetType: 'inline'
+              script: 'npm run build'
+
+  - stage: PublishStage
+    displayName: 'Application Publish'
+    dependsOn: Build
+    jobs:
+      - job: Publishjob
+        steps:
+          - task: PublishPipelineArtifact@1
+            inputs:
+              targetPath: '$(System.DefaultWorkingDirectory)'
+              artifact: 'application_artifact'
+              publishLocation: 'pipeline'
+
+  - stage: DeployStage
+    displayName: 'Deploy Application'
+    dependsOn: PublishStage
+    jobs:
+      - job: Deployjob
+        steps:
+          - task: DownloadBuildArtifacts@1
+            inputs:
+              buildType: 'current'
+              downloadType: 'single'
+              artifactName: 'application_artifact'
+              downloadPath: '$(System.DefaultWorkingDirectory)/build'
